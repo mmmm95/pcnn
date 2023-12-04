@@ -1,0 +1,199 @@
+import cv2
+from tensorflow.keras import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import MSE
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from imutils import paths
+from sklearn.model_selection import KFold
+import pandas as pd
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
+from keras.models import load_model
+
+
+###############################################################
+batch_size = 8
+target_size = (120, 160)
+seed = 909
+k = 5  # number of folds
+epochs = 70
+# set up the image data generators
+image_datagen = ImageDataGenerator(rescale=1. / 255)
+mask_datagen = ImageDataGenerator(rescale=1. / 255)
+val_image_datagen = ImageDataGenerator(rescale=1. / 255)
+val_mask_datagen = ImageDataGenerator(rescale=1. / 255)
+test_image_datagen = ImageDataGenerator(rescale=1. / 255)
+test_mask_datagen = ImageDataGenerator(rescale=1. / 255)
+
+# get the file paths for the images and masks
+image_paths = np.array(
+    sorted(list(paths.list_images('C:/Users/DiGi_Land/Desktop/dataset/data1/data1/dataset/dataset/1'))))
+mask_paths = np.array(
+    sorted(list(paths.list_images('C:/Users/DiGi_Land/Desktop/dataset/data1/data1/targets/targets/1'))))
+
+# create KFold cross-validation object
+kfold = KFold(n_splits=k, shuffle=False, random_state=None)
+
+# loop through the folds
+for i, (train_index, val_index) in enumerate(kfold.split(image_paths)):
+    print(f"Fold {i + 1}")
+
+    # get the training and validation file paths for this fold
+    train_image_paths, val_image_paths = image_paths[train_index], image_paths[val_index]
+    train_mask_paths, val_mask_paths = mask_paths[train_index], mask_paths[val_index]
+
+    # set up the data generators for this fold
+    train_image_generator = image_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': train_image_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    train_mask_generator = mask_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': train_mask_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+    val_image_generator = image_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': val_image_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    val_mask_generator = mask_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': val_mask_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    # set up the generators for training and validation
+    train_generator = zip(train_image_generator, train_mask_generator)
+    val_generator = zip(val_image_generator, val_mask_generator)
+
+
+
+###########define model###################################
+
+def build_model():
+        model = tf.keras.Sequential([
+            tf.keras.layers.SeparableConv2D(32, 1, padding='same', input_shape=(120, 160, 1)),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(32, 3, padding='same', activation='relu'),
+            tf.keras.layers.SeparableConv2D(1, 1, padding='same', activation='sigmoid')
+        ])
+
+        return model
+
+model=build_model()
+model.summary()
+
+lr_schedule = tf.keras.optimizers.schedules.PolynomialDecay(
+    initial_learning_rate=0.001,
+    decay_steps=len(train_image_paths) // batch_size,
+    end_learning_rate=0.000001,
+    power=0.9,
+    cycle=False
+)
+
+###hyper parameters and compiling model
+opt = Adam(learning_rate=lr_schedule, beta_1=0.9 , beta_2=0.999) # Adam optimizer
+loss = MSE # Mean Square Error for loss function
+model.compile(optimizer=opt, loss = loss, metrics= ['acc',tf.keras.metrics.TruePositives(), tf.keras.metrics.TrueNegatives(),tf.keras.metrics.FalsePositives(), tf.keras.metrics.FalseNegatives()])
+
+ ###Set up GPUs
+gpus = tf.config.experimental.list_physical_devices('GPU')
+print(gpus)
+if gpus:
+    try:
+        # Currently, memory growth needs to be the same across GPUs
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        # Logical devices must be created after setting memory growth
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Memory growth must be set before GPUs have been initialized
+        print(e)
+
+###fit model
+with tf.device('/GPU:0'):  # Specify GPU device to use
+    # train the model on this fold
+    results = model.fit(
+        train_generator,
+        epochs=epochs,
+        steps_per_epoch=len(train_image_paths) // batch_size,
+        validation_data=val_generator,
+        validation_steps=len(val_image_paths) // batch_size
+    )
+
+
+model.save('C:/Users/DiGi_Land/Desktop/dataset/600/pspurpose75.h5')
+
+###########pred model################################
+img = val_image_generator[443]
+msk = val_mask_generator[443]
+pred_mask = model1.predict(img)
+
+threshold = 0.5
+binary_pred_mask = (pred_mask > threshold).astype(np.uint8)
+
+plt.figure(figsize=(10, 14))
+for i in range(5):
+    plt.subplot(5, 3, 3 * i + 1)
+    plt.imshow(img, cmap='gray')
+    if i == 0:
+        plt.title('Input')
+
+    plt.subplot(5, 3, 3 * i + 2)
+    plt.imshow(binary_pred_mask[i], cmap='gray', vmin=0, vmax=1)  # Display as binary (0 and 1)
+    if i == 0:
+        plt.title('Pred')
+
+    plt.subplot(5, 3, 3 * i + 3)
+    plt.imshow(msk[i], cmap='gray')
+    if i == 0:
+        plt.title('GT')
+
+plt.show()
+
