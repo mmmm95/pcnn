@@ -1,0 +1,126 @@
+from tensorflow.keras import Model
+from tensorflow.keras.layers import Conv2D, Flatten, Dense, MaxPooling2D, Input, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import MSE
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from imutils import paths
+from sklearn.model_selection import KFold
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import cv2
+from keras.models import load_model
+
+# Define hyperparameters and data paths
+batch_size = 8
+target_size = (120, 160)
+seed = 909
+k = 10  # number of folds
+epochs = 200
+
+# Set up the image data generators
+image_datagen = ImageDataGenerator(rescale=1.0 / 255)
+mask_datagen = ImageDataGenerator(rescale=1.0 / 255)
+
+# get the file paths for the images and masks
+image_paths = np.array(sorted(list(paths.list_images('D:/ubiris2_1_2/ubiris_seg/dataset/train'))))
+mask_paths = np.array(sorted(list(paths.list_images('D:/ubiris2_1_2/ubiris_seg/dataset/gtrain'))))
+# Create KFold cross-validation object
+kfold = KFold(n_splits=k, shuffle=True, random_state=seed)
+
+# Loop through the folds
+for i, (train_index, val_index) in enumerate(kfold.split(image_paths)):
+    print(f"Fold {i + 1}")
+
+    train_image_paths, val_image_paths = image_paths[train_index], image_paths[val_index]
+    train_mask_paths, val_mask_paths = mask_paths[train_index], mask_paths[val_index]
+
+    # Set up the data generators for this fold
+    train_image_generator = image_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': train_image_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    train_mask_generator = mask_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': train_mask_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    val_image_generator = image_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': val_image_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    val_mask_generator = mask_datagen.flow_from_dataframe(
+        dataframe=pd.DataFrame({'filename': val_mask_paths}),
+        directory=None,
+        x_col="filename",
+        y_col=None,
+        color_mode="grayscale",
+        target_size=target_size,
+        batch_size=batch_size,
+        class_mode=None,
+        shuffle=None,
+        seed=seed
+    )
+
+    # Set up the generators for training and validation
+    train_generator = zip(train_image_generator, train_mask_generator)
+    val_generator = zip(val_image_generator, val_mask_generator)
+
+    # Load the model for this fold
+    model = load_model('C:/Users/DiGi_Land/Desktop/dataset/600/purpose900.h5')
+
+    # Define hyperparameters and compile the model
+    opt = Adam(learning_rate=5e-5, beta_1=0.9, beta_2=0.999)
+    loss = MSE
+    model.compile(optimizer=opt, loss=loss, metrics=['acc', tf.keras.metrics.TruePositives(), tf.keras.metrics.TrueNegatives(), tf.keras.metrics.FalsePositives(), tf.keras.metrics.FalseNegatives()])
+
+    # Set up GPUs
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    print(gpus)
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+        except RuntimeError as e:
+            print(e)
+
+    # Fit the model
+    with tf.device('/GPU:0'):
+        results = model.fit(
+            train_generator,
+            epochs=epochs,
+            steps_per_epoch=len(train_image_paths) // batch_size,
+            validation_data=val_generator,
+            validation_steps=len(val_image_paths) // batch_size
+        )
+
+    # Save the model for this fold
+    model.save(f'C:/Users/DiGi_Land/Desktop/dataset/600/ubmodel_fold_{i}.h5')
